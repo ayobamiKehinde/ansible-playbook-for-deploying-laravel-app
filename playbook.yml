@@ -1,0 +1,144 @@
+---
+- name: Update and deploy application
+  hosts: all
+  become: yes
+  vars:
+    ubuntu_user: ubuntu
+    rhel_user: ec1-user
+    ubuntu_web_dir: /var/www/html
+    rhel_web_dir: /var/www/html
+  tasks:
+    - name: Update packages
+      package:
+        name: '*'
+        state: latest
+
+    - name: Install git
+      package:
+        name: git
+        state: present
+
+    - name: Install Apache (Ubuntu)
+      package:
+        name: apache2
+        state: present
+      when: ansible_os_family == 'Debian'
+    
+    - name: Start HTTPD (RHEL)
+      service:
+        name: httpd
+        state: started
+        enabled: yes
+      when: ansible_os_family == 'RedHat'
+
+    - name: Clone git repository
+      git:
+        repo: "https://github.com/ayobamiKehinde/assignment-3.git"
+        dest: "/home/{{ 'ubuntu' if ansible_os_family == 'Debian' else 'ec2-user' }}/assignment-3"
+        clone: yes
+
+    - name: Copy project files to appropriate location (Ubuntu)
+      ansible.builtin.copy:
+        src: "/home/{{ 'ubuntu' }}/assignment-3"
+        dest: "/var/www/assignment-3/"
+        remote_src: yes
+      when: ansible_os_family == 'Debian'
+
+    - name: Copy project files to appropriate location (RHEL)
+      ansible.builtin.copy:
+        src: "/home/{{ 'ec2-user' }}/assignment-3"
+        dest: "/var/www/assignment-3/"
+        remote_src: yes
+      when: ansible_os_family == 'RedHat'
+
+    - name: Set ownership and permissions for Apache (Ubuntu)
+      file:
+        path: "/var/www/assignment-3"
+          OB
+        state: directory
+        owner: www-data
+        group: www-data
+        mode: '0777'
+      when: ansible_os_family == 'Debian'
+
+    - name: Set ownership and permissions for HTTPD (RHEL)
+      file:
+        path: "/var/www/assignment-3"
+        state: directory
+        owner: apache
+        group: apache
+        mode: '0777'
+      when: ansible_os_family == 'RedHat'
+
+    - name: Create Apache virtual host configuration
+      copy:
+        content: |
+          <VirtualHost *:80>
+              ServerAdmin webmaster@localhost
+              DocumentRoot "/var/www/assignment-3"
+
+              ErrorLog ${APACHE_LOG_DIR}/error.log
+              CustomLog ${APACHE_LOG_DIR}/access.log combined
+
+              <Directory "/var/www/assignment-3">
+                  Options Indexes FollowSymLinks MultiViews
+            OOB      AllowOverride All
+                  Require all granted
+              </Directory>
+          </VirtualHost>
+        dest: /etc/apache2/sites-available/assignment-3.conf
+      notify: Enable and restart Apache2
+      when: ansible_os_family == 'Debian'
+
+    - name: Create HTTPD virtual host configuration
+      copy:
+        content: |
+          <VirtualHost *:80>
+              ServerAdmin root@localhost
+              DocumentRoot "/var/www/assignment-3"
+              ServerName example.com
+
+              ErrorLog logs/assignment-3-error_log
+              CustomLog logs/assignment-3-access_log common
+
+              <Directory "/var/www/assignment-3">
+                  AllowOverride All
+                  Options Indexes FollowSymLinks
+                  Require all granted
+              </Directory>
+          </VirtualHost>
+        dest: "/etc/httpd/conf.d/assignment-3.conf"
+      notify: Enable and restart HTTPD
+      when: ansible_os_family == 'RedHat'
+
+    - name: Disable default site configuration (Ubuntu)
+      ansible.builtin.command: a2dissite 000-default
+      args:
+        creates: /etc/apache2/sites-enabled/000-default.conf
+      when: ansible_os_family == 'Debian'
+
+    - name: Disable default site configuration (RHEL)
+      ansible.builtin.file:
+        path: /etc/httpd/conf.d/welcome.conf
+        state: absent
+      when: ansible_os_family == 'RedHat'
+
+     - name: Enable site configuration for the application (Ubuntu)
+      ansible.builtin.command: a2ensite assignment-3
+      args:
+        creates: /etc/apache2/sites-enabled/assignment-3.conf
+      notify: Enable and restart Apache2
+      when: ansible_os_family == 'Debian'
+
+  handlers:
+    - name: Enable and restart Apache2
+      ansible.builtin.systemd:
+        name: apache2
+        state: restarted
+      when: ansible_os_family == 'Debian'
+
+    - name: Enable and restart HTTPD
+      ansible.builtin.systemd:
+        name: httpd
+        state: restarted
+      when: ansible_os_family == 'RedHat'
